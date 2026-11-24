@@ -311,6 +311,10 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--body);font-si
 .scroll-form>.btn-forge.btn-danger{background:transparent;color:var(--red2);border-color:var(--red2)}
 .btn-c{padding:10px 16px;font-size:12px;border-radius:4px;min-height:40px}
 .btn-del{padding:8px 11px;font-size:12px;border-radius:4px}
+.nxt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px;margin:4px 0 10px;background:var(--p2);border:1px solid var(--gold);border-radius:4px;color:#fff6dc;font-family:var(--body);font-size:17px;line-height:1.3;cursor:pointer;transition:background .15s,transform .1s}
+.nxt:hover{background:var(--p3)}.nxt:active{transform:scale(.99)}
+.nxt i{width:12px;height:12px;border:1.5px solid var(--g2);transform:rotate(45deg);flex-shrink:0;animation:pulse 1.4s infinite}
+.nxt span{flex:1;min-width:0}.nxt b{font-family:var(--font);font-size:12px;color:var(--gold);white-space:nowrap}
 /* ── MODALS ── */
 .lu-back,.modal-back,.ne-back{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:600;padding:20px}
 .lu-back.show,.modal-back.show,.ne-back.show{display:flex}
@@ -814,8 +818,21 @@ function gainXP(pts,name,icon){
   }
 }
 function doneHabit(i){const h=S.habits[i],td=new Date().toDateString();if(!h.done)h.done=[];if(h.done.includes(td)){toast("Already done today!");return;}const m=habitMult(h),x=Math.round((h.xp||DEF_XP.habit)*m);h.done.push(td);(h.xpLog=h.xpLog||{})[td]=x;gainXP(x,h.name+(m>1?" (×"+m+")":""),"✅");checkPerfect();}
-function doneQuest(i){const q=S.quests[i];if(q.done){toast("Already done!");return;}q.done=true;q.doneAt=new Date().toDateString();(q.steps||[]).forEach(s=>s.done=true);if(S.active&&S.active.id===q.id)S.active=null;gainXP(Math.max(0,(q.xp||DEF_XP[q.type]||200)-(q.stepXp||0)),q.name,"📜");confetti(70);qBanner("Quest Completed",q.name);qSel=null;qMob=false;renderQuests();}
-function doneSQ(i){const q=S.sidequests[i];if(q.done){toast("Already done!");return;}q.done=true;q.doneAt=new Date().toDateString();(q.steps||[]).forEach(s=>s.done=true);if(S.active&&S.active.id===q.id)S.active=null;gainXP(Math.max(0,(q.xp||DEF_XP.sq)-(q.stepXp||0)),q.name,"🗺");confetti(50);qBanner("Side Quest Completed",q.name);qSel=null;qMob=false;renderQuests();}
+function okDone(q,k){const st=q.steps||[],p=st.filter(s=>!s.done).length,x=Math.max(0,qxp(q,k)-(q.stepXp||0));return confirm(p?`“${q.name}” still has ${p} pending objective${p>1?"s":""}.\n\nComplete it anyway and earn +${x} XP?`:`Complete “${q.name}” and earn +${x} XP?`);}
+function finishQ(k,i){const q=qList(k)[i];if(q.done){toast("Already done!");return;}if(!okDone(q,k))return;
+  const x=Math.max(0,qxp(q,k)-(q.stepXp||0));q.done=true;q.doneAt=new Date().toDateString();q.doneXp=x;q.autoDone=(q.steps||[]).map((s,j)=>s.done?-1:j).filter(j=>j>=0);(q.steps||[]).forEach(s=>s.done=true);if(S.active&&S.active.id===q.id)S.active=null;
+  gainXP(x,q.name,k==="quests"?"📜":"🗺");confetti(k==="quests"?70:50);qBanner(k==="quests"?"Quest Completed":"Side Quest Completed",q.name);qSel=null;qMob=false;renderQuests();}
+function doneQuest(i){finishQ("quests",i);}
+function doneSQ(i){finishQ("sq",i);}
+function reopenQuest(k,i){const q=qList(k)[i];if(!q.done)return;
+  const x=q.doneXp!==undefined?q.doneXp:Math.max(0,qxp(q,k)-(q.stepXp||0)),bal=S.xp-S.spent;
+  if(bal<x){toast("Can't reopen: "+(x-bal)+" of that gold was already spent.");return;}
+  if(!confirm(`Reopen “${q.name}”?\n\nThis takes back ${x} XP and the same amount of gold.`))return;
+  const st=q.steps||[];
+  if(q.autoDone)q.autoDone.forEach(j=>{if(st[j])st[j].done=false;});
+  else if(st.length){const sx=Math.round(qxp(q,k)*.3/st.length),c=sx>0?Math.min(st.length,Math.round((q.stepXp||0)/sx)):0;st.forEach((s,j)=>s.done=j<c);}
+  S.xp=Math.max(0,S.xp-x);q.done=false;delete q.doneAt;delete q.doneXp;delete q.autoDone;
+  S.hist.unshift({name:"Reopened: "+q.name,xp:-x,icon:"↺",time:nowT()});qSel={k,id:q.id};qMob=true;save();ui();qBanner("Quest Reopened",q.name);}
 
 // ═══════════════════════════════════════════
 //  CONFIRM BUY
@@ -1026,10 +1043,10 @@ function renderToday(){
   h+="</div>";
   if(S.habits.length){const y=new Date();y.setDate(y.getDate()-1);const ky=y.toDateString(),canY=!(S.rest||{})[ky]&&S.habits.some(x=>(x.done||[]).length)&&!S.habits.some(x=>(x.done||[]).includes(ky));
     h+=`<div class="t-card"><div class="lbl">🛡 Shields ${shieldCount()}/3 · earn one per 5 perfect days</div>${rest?'<button class="btn-forge" onclick="cancelRest()">Cancel rest day</button>':'<button class="btn-forge" onclick="useShield(0)">Rest today</button>'}${canY?' <button class="btn-forge" onclick="useShield(1)">Save yesterday</button>':""}</div>`;}
-  const all=[...S.quests.map((q,i)=>({q,i,k:"Quest",f:"doneQuest"})),...S.sidequests.map((q,i)=>({q,i,k:"Side quest",f:"doneSQ"}))].filter(o=>!o.q.done);
+  const all=[...S.quests.map((q,i)=>({q,i,k:"Quest",kc:"quests"})),...S.sidequests.map((q,i)=>({q,i,k:"Side quest",kc:"sq"}))].filter(o=>!o.q.done);
   const t=o=>o.q.deadline?+new Date(o.q.deadline):9e15;all.sort((a,b)=>t(a)-t(b));const aq=activeQuest(),qd=aq?null:all[0];
   h+=aq?activeCardHTML(aq):'<div class="rdiv"><span>quest of the day</span></div>';
-  h+=aq?"":qd?`<div class="t-card"><div class="lbl">⭐ ${qd.k}${qd.q.deadline?" · "+fmtDL(qd.q.deadline):""}</div><div class="nm">${qd.q.name}</div><button class="btn-forge" onclick="${qd.f}(${qd.i})">Complete · +${qd.q.xp||DEF_XP[qd.q.type]||DEF_XP.sq} XP</button></div>`:'<div class="empty-s">No open quests. Add one in 🎯 Objectives.</div>';
+  h+=aq?"":qd?questCard({q:qd.q,i:qd.i,k:qd.kc},"⭐ "+qd.k):'<div class="empty-s">No open quests. Add one in 🎯 Objectives.</div>';
   const bal=S.xp-S.spent,rs=S.rewards.map((r,i)=>({r,i})).sort((a,b)=>a.r.cost-b.r.cost),nr=rs.find(o=>o.r.name===S.goal)||rs.find(o=>o.r.cost>bal)||rs[0],ready=rs.filter(o=>o.r.cost<=bal).length;
   if(nr){h+='<div class="rdiv"><span>next reward</span></div>';const ok=nr.r.cost<=bal;
     h+=`<div class="t-card"><div class="lbl">${S.goal===nr.r.name?"★ Your goal · ":""}${ready&&!ok?"🎁 "+ready+" reward"+(ready>1?"s":"")+" ready to claim":"💰 "+bal.toLocaleString()+" gold available"}</div><div class="nm">${nr.r.icon} ${nr.r.name} · ${nr.r.cost}</div>${ok?`<button class="btn-forge" onclick="confirmBuy(${nr.i})">Claim now</button>`:`<div class="bar-bg"><div class="bar-fill" style="width:${Math.min(100,bal/nr.r.cost*100)}%"></div></div><div class="th-m" style="margin-top:5px">${nr.r.cost-bal} gold to go</div>`}</div>`;}
@@ -1072,14 +1089,17 @@ const qList=k=>k==="quests"?S.quests:S.sidequests;
 const qxp=(q,k)=>q.xp||(k==="quests"?DEF_XP[q.type]:DEF_XP.sq)||200;
 function parseSteps(id){const e=document.getElementById(id),r=(e.value||"").split("\n").map(s=>s.trim()).filter(Boolean).map(t=>({t,done:false}));e.value="";return r;}
 function activeQuest(){if(!S.active)return null;const k=S.active.k,i=qList(k).findIndex(q=>q.id===S.active.id);if(i<0||qList(k)[i].done){S.active=null;return null;}return{q:qList(k)[i],k,i};}
-function activeCardHTML(a){const q=a.q,st=q.steps||[],nd=st.filter(s=>s.done).length,j=st.findIndex(s=>!s.done);
-  return `<div class="rdiv"><span>active quest</span></div><div class="t-card" style="border-color:var(--gold)"><div class="lbl">◆ ${a.k==="quests"?"Quest":"Side quest"}${q.deadline?" · "+fmtDL(q.deadline):""}</div><div class="nm">${q.name}</div>${st.length?`<div class="qs c" style="margin-bottom:8px" onclick="${j>=0?`toggleStep('${a.k}',${a.i},${j})`:""}"><span class="qs-n"></span><span>${j>=0?st[j].t:"All objectives complete"}</span></div><div class="bar-bg"><div class="bar-fill" style="width:${nd/st.length*100}%"></div></div><div class="th-m" style="margin:5px 0 8px">${nd}/${st.length} objectives · tap to check off</div>`:""}<button class="btn-forge" onclick="${a.k==="quests"?"doneQuest":"doneSQ"}(${a.i})">Complete · +${Math.max(0,qxp(q,a.k)-(q.stepXp||0))} XP</button></div>`;}
+function openQuest(k,id){objGo("quests");selQ(k,id);}
+function questCard(a,label){const q=a.q,k=a.k,st=q.steps||[],nd=st.filter(s=>s.done).length,j=st.findIndex(s=>!s.done),sx=st.length?Math.round(qxp(q,k)*.3/st.length):0,dn=k==="quests"?"doneQuest":"doneSQ";if(!q.id)q.id=uid();
+  const main=st.length&&j>=0?`<button class="nxt" onclick="toggleStep('${k}',${a.i},${j})"><i></i><span>${st[j].t}</span><b>+${sx} XP</b></button>`:`<button class="nxt" onclick="${dn}(${a.i})"><i></i><span>${st.length?"All objectives done · complete quest":"Complete quest"}</span><b>+${Math.max(0,qxp(q,k)-(q.stepXp||0))} XP</b></button>`;
+  return `<div class="t-card" style="border-color:var(--gold)"><div class="lbl">${label}${q.deadline?" · "+fmtDL(q.deadline):""}</div><div class="nm">${q.name}</div>${main}${st.length?`<div class="bar-bg"><div class="bar-fill" style="width:${nd/st.length*100}%"></div></div>`:""}<div class="th-m" style="margin-top:6px;display:flex;justify-content:space-between"><span>${st.length?nd+"/"+st.length+" objectives":""}</span><a href="#" style="color:var(--gold)" onclick="openQuest('${k}','${q.id}');return false">View quest ›</a></div></div>`;}
+function activeCardHTML(a){return '<div class="rdiv"><span>active quest</span></div>'+questCard(a,"◆ "+(a.k==="quests"?"Quest":"Side quest"));}
 function parseDesc(id){const e=document.getElementById(id),v=(e.value||"").trim();e.value="";return v;}
 function selQ(k,id){qSel={k,id};qMob=true;renderQuests();window.scrollTo({top:0,behavior:"smooth"});}
 function qBack(){qMob=false;renderQuests();}
 function qBanner(t,s){const b=document.createElement("div");b.className="qb";b.innerHTML=`<div class="qb-t">${t}</div><div class="qb-o">◆ ─────── ◆</div><div class="qb-s">${s||""}</div>`;document.body.appendChild(b);setTimeout(()=>b.remove(),2900);}
 function qDetail(o,a){const q=o.q,k=o.k,i=o.i,st=q.steps||[],cur=st.findIndex(s=>!s.done),dn=k==="quests"?"doneQuest":"doneSQ";
-  return `<div class="qd" id="qd"><button class="qd-back" onclick="qBack()">‹ Journal</button><div class="qd-cat">${k==="quests"?"Main Quest":"Side Quest"}${a?" · ◆ Active":""}${q.done?" · Completed":""}</div><div class="qd-title">${q.name}</div><div class="qd-orn">────── ◆ ──────</div><div class="qd-meta"><span class="qtag ${AREA_TAG[q.area]||""}">${AREA_LBL[q.area]}</span>${q.subcat?`<span>${q.subcat}</span>`:""}<span>⭐ ${qxp(q,k)} XP</span>${q.deadline&&!q.done?fmtDL(q.deadline):""}</div>${q.desc?`<div class="qd-desc">${q.desc}</div>`:""}<div class="qd-sec">Objectives</div>${st.length?st.map((s,j)=>`<div class="qo${s.done?" d":j===cur?" c":""}" onclick="toggleStep('${k}',${i},${j})"><span class="qo-n"></span><span>${s.t}</span></div>`).join(""):'<div class="qd-hint">No objectives yet. Add some below, or simply complete the quest.</div>'}${q.done?"":`<div class="qs-add"><input id="ns-${q.id}" placeholder="+ add objective" onkeydown="if(event.key==='Enter')addStep('${k}',${i})"><button class="btn-c" onclick="addStep('${k}',${i})">Add</button></div>`}<div class="qd-acts">${q.done?"":`<button onclick="setActive('${k}',${i})">${a?"◇ Untrack":"◆ Track"}</button><button onclick="editQuest('${k}',${i})">✎ Edit</button><button class="go" onclick="${dn}(${i})">✓ Complete</button>`}<button class="rm" onclick="delQ('${k}',${i})">${q.done?"Remove":"Abandon"}</button></div></div>`;}
+  return `<div class="qd" id="qd"><button class="qd-back" onclick="qBack()">‹ Journal</button><div class="qd-cat">${k==="quests"?"Main Quest":"Side Quest"}${a?" · ◆ Active":""}${q.done?" · Completed":""}</div><div class="qd-title">${q.name}</div><div class="qd-orn">────── ◆ ──────</div><div class="qd-meta"><span class="qtag ${AREA_TAG[q.area]||""}">${AREA_LBL[q.area]}</span>${q.subcat?`<span>${q.subcat}</span>`:""}<span>⭐ ${qxp(q,k)} XP</span>${q.deadline&&!q.done?fmtDL(q.deadline):""}</div>${q.desc?`<div class="qd-desc">${q.desc}</div>`:""}<div class="qd-sec">Objectives</div>${st.length?st.map((s,j)=>`<div class="qo${s.done?" d":j===cur?" c":""}" onclick="toggleStep('${k}',${i},${j})"><span class="qo-n"></span><span>${s.t}</span></div>`).join(""):'<div class="qd-hint">No objectives yet. Add some below, or simply complete the quest.</div>'}${q.done?"":`<div class="qs-add"><input id="ns-${q.id}" placeholder="+ add objective" onkeydown="if(event.key==='Enter')addStep('${k}',${i})"><button class="btn-c" onclick="addStep('${k}',${i})">Add</button></div>`}<div class="qd-acts">${q.done?`<button class="go" onclick="reopenQuest('${k}',${i})">↺ Reopen</button>`:`<button onclick="setActive('${k}',${i})">${a?"◇ Untrack":"◆ Track"}</button><button onclick="editQuest('${k}',${i})">✎ Edit</button><button class="go" onclick="${dn}(${i})">✓ Complete</button>`}<button class="rm" onclick="delQ('${k}',${i})">${q.done?"Remove":"Abandon"}</button></div></div>`;}
 function renderQuests(){
   const el=document.getElementById("quests-list");if(!el)return;
   [...S.quests,...S.sidequests].forEach(q=>{if(!q.id)q.id=uid();});
